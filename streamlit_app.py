@@ -1,8 +1,10 @@
 import streamlit as st
 import os
 import shutil
+import subprocess
 import tempfile
 import time
+from streamlit_sortables import sort_items
 from concat_videos import (
     MIN_TIKTOK_SLOW_FACTOR,
     TIKTOK_CUT_AFTER_SECONDS,
@@ -15,6 +17,36 @@ from concat_videos import (
 
 # Constants
 OUTPUT_CACHE_DIR = "output_cache"
+ORDER_LIST_STYLE = """
+.sortable-component {
+    width: 100%;
+}
+.sortable-component.vertical {
+    gap: 0.35rem;
+}
+.sortable-item {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 3rem;
+    margin: 0 !important;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    padding: 0.7rem 0.85rem;
+    background: rgba(255, 255, 255, 0.04);
+    cursor: grab;
+    transform: none !important;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.sortable-item:hover {
+    border-color: rgba(255, 75, 75, 0.65);
+    background: rgba(255, 75, 75, 0.14);
+    transform: none !important;
+}
+.sortable-item:active {
+    cursor: grabbing;
+    transform: none !important;
+}
+"""
 
 # Ensure cache directory exists
 if not os.path.exists(OUTPUT_CACHE_DIR):
@@ -45,6 +77,91 @@ def clear_cache():
                 shutil.rmtree(file_path)
         except Exception as e:
             st.error(f"Failed to delete {file_path}. Reason: {e}")
+
+def escape_applescript_string(value):
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+def choose_folder_with_finder(start_path):
+    if os.name != "posix" or not os.path.exists("/usr/bin/osascript"):
+        return None, "Finder folder selection is only available on macOS."
+
+    default_path = start_path if os.path.isdir(start_path) else os.path.expanduser("~")
+    result = subprocess.run(
+        [
+            "osascript",
+            "-e",
+            'tell application "Finder" to activate',
+            "-e",
+            f'POSIX path of (choose folder default location POSIX file "{escape_applescript_string(default_path)}")'
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+    if result.returncode != 0:
+        if "User canceled" in result.stderr:
+            return None, None
+        return None, result.stderr.strip() or "Could not open Finder folder picker."
+    return result.stdout.strip(), None
+
+def get_ordered_items(state_key, items):
+    existing_order = st.session_state.get(state_key, [])
+    ordered_items = [item for item in existing_order if item in items]
+    ordered_items.extend([item for item in items if item not in ordered_items])
+    st.session_state[state_key] = ordered_items
+    return ordered_items
+
+def render_order_controls(state_key, items):
+    if not items:
+        return []
+
+    ordered_items = get_ordered_items(state_key, items)
+    control_key = f"{state_key}_{len(ordered_items)}"
+
+    st.markdown("### Video Order")
+    if len(ordered_items) > 1:
+        dragged_items = sort_items(
+            ordered_items,
+            direction="vertical",
+            custom_style=ORDER_LIST_STYLE,
+            key=f"{control_key}_drag"
+        )
+        if dragged_items != ordered_items:
+            ordered_items = dragged_items
+            st.session_state[state_key] = ordered_items
+    else:
+        st.markdown(f"1. `{ordered_items[0]}`")
+
+    if len(ordered_items) > 1:
+        col_a, col_b, col_c, col_d = st.columns([1, 1, 1, 1])
+        first_position = col_a.number_input(
+            "First position",
+            min_value=1,
+            max_value=len(ordered_items),
+            value=1,
+            step=1,
+            key=f"{control_key}_first_position"
+        )
+        second_position = col_b.number_input(
+            "Second position",
+            min_value=1,
+            max_value=len(ordered_items),
+            value=2,
+            step=1,
+            key=f"{control_key}_second_position"
+        )
+        if col_c.button("Swap Selected", key=f"{control_key}_swap"):
+            first_index = int(first_position) - 1
+            second_index = int(second_position) - 1
+            if first_index != second_index:
+                ordered_items[first_index], ordered_items[second_index] = ordered_items[second_index], ordered_items[first_index]
+                st.session_state[state_key] = ordered_items
+                st.rerun()
+        if col_d.button("Reverse Order", key=f"{control_key}_reverse"):
+            st.session_state[state_key] = list(reversed(ordered_items))
+            st.rerun()
+
+    return ordered_items
 
 st.set_page_config(page_title="Video Combiner", page_icon="🎬", layout="wide")
 
@@ -135,23 +252,41 @@ with st.sidebar:
         st.rerun()
 
 
-input_method = st.radio("Input Method", ["Upload Files", "Local Directory Path"], horizontal=True)
+input_method = st.radio("Input Method", ["Local Directory Path", "Upload Files"], horizontal=True)
 
 if input_method == "Upload Files":
-    uploaded_files = st.file_uploader("Upload MP4/MOV Videos", type=["mp4", "mov"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader(
+        "Upload MP4/MOV Videos",
+        type=["mp4", "mov"],
+        accept_multiple_files=True,
+        help="Uploads are configured up to 100 GB per file. For very large local footage, use Local Directory Path to avoid browser upload overhead."
+    )
     if uploaded_files:
-        st.success(f"Selected {len(uploaded_files)} files.")
+        upload_file_map = {uploaded_file.name: uploaded_file for uploaded_file in uploaded_files}
+        ordered_upload_names = render_order_controls("uploaded_video_order", list(upload_file_map.keys()))
+        total_upload_size = sum(upload_file_map[name].size for name in ordered_upload_names)
+        st.success(f"Selected {len(uploaded_files)} files ({format_size(total_upload_size)} total).")
         if st.button("Start Concatenation"):
             with tempfile.TemporaryDirectory() as tmp_dir:
                 status_text = st.empty()
-                progress_bar = st.progress(0)
-                status_text.text("Saving uploaded files...")
-                for uploaded_file in uploaded_files:
+                upload_progress_bar = st.progress(0, text="Preparing uploads...")
+                processing_progress_bar = st.progress(0, text="Waiting to process...")
+                saved_size = 0
+                for uploaded_file_name in ordered_upload_names:
+                    uploaded_file = upload_file_map[uploaded_file_name]
+                    status_text.text(f"Saving upload: {uploaded_file.name}")
                     with open(os.path.join(tmp_dir, uploaded_file.name), "wb") as f:
                         f.write(uploaded_file.getbuffer())
+                    saved_size += uploaded_file.size
+                    upload_progress = min(saved_size / total_upload_size, 1.0) if total_upload_size > 0 else 1.0
+                    upload_progress_bar.progress(
+                        upload_progress,
+                        text=f"Saved uploads: {format_size(saved_size)} / {format_size(total_upload_size)}"
+                    )
+                upload_progress_bar.progress(1.0, text="Uploads ready")
                 
                 # 1. Validate Consistency
-                files = sorted([f for f in os.listdir(tmp_dir) if f.lower().endswith(VIDEO_EXTENSIONS)])
+                files = [name for name in ordered_upload_names if name.lower().endswith(VIDEO_EXTENSIONS)]
                 if mode == "tiktok":
                     st.success("TikTok mode will normalize and re-encode the clips before combining.")
                 else:
@@ -174,7 +309,7 @@ if input_method == "Upload Files":
                 
                 def streamlit_progress(current, total):
                     progress = min(current / total, 1.0) if total > 0 else 0
-                    progress_bar.progress(progress)
+                    processing_progress_bar.progress(progress, text=f"Processing: {current:.1f}s / {total:.1f}s")
                     status_text.text(f"Processing: {current:.1f}s / {total:.1f}s")
 
                 success = concatenate_videos_logic(
@@ -186,7 +321,8 @@ if input_method == "Upload Files":
                     progress_callback=streamlit_progress,
                     tiktok_normal_seconds=tiktok_normal_seconds,
                     tiktok_slow_factor=tiktok_slow_factor,
-                    tiktok_cut_after_seconds=tiktok_cut_after_seconds
+                    tiktok_cut_after_seconds=tiktok_cut_after_seconds,
+                    ordered_files=files
                 )
                 if success and os.path.exists(cache_output_path):
                     st.balloons()
@@ -202,12 +338,67 @@ if input_method == "Upload Files":
     else:
         st.warning("Please upload some MP4 files.")
 else:
-    local_dir = st.text_input("Local Directory Path", value=os.getcwd(), help="Absolute path to the folder containing videos.")
-    output_dir = st.text_input("Output Directory", value=os.getcwd(), help="Where to save the result.")
+    st.session_state.setdefault("local_dir_input", os.getcwd())
+    st.session_state.setdefault("output_dir_input", os.getcwd())
+
+    local_col, local_picker_col = st.columns([4, 1])
+    if local_picker_col.button("Choose Folder", key="choose_local_dir"):
+        selected_path, picker_error = choose_folder_with_finder(st.session_state.local_dir_input)
+        if picker_error:
+            st.error(picker_error)
+        elif selected_path:
+            st.session_state.local_dir_input = selected_path
+    local_dir = local_col.text_input(
+        "Local Directory Path",
+        key="local_dir_input",
+        help="Absolute path to the folder containing videos."
+    )
+
+    custom_output_dir = st.checkbox(
+        "Use Custom Output Directory",
+        value=False,
+        help="Leave off to save the finished video in the same folder as the input videos."
+    )
+    if custom_output_dir:
+        if st.session_state.output_dir_input == os.getcwd() and os.path.isdir(local_dir):
+            st.session_state.output_dir_input = local_dir
+        output_col, output_picker_col = st.columns([4, 1])
+        if output_picker_col.button("Choose Folder", key="choose_output_dir"):
+            selected_path, picker_error = choose_folder_with_finder(st.session_state.output_dir_input)
+            if picker_error:
+                st.error(picker_error)
+            elif selected_path:
+                st.session_state.output_dir_input = selected_path
+        output_dir = output_col.text_input(
+            "Output Directory",
+            key="output_dir_input",
+            help="Where to save the result."
+        )
+    else:
+        output_dir = local_dir
+        st.caption(f"Output directory: `{output_dir}`")
+
+    local_files = []
+    if os.path.isdir(local_dir):
+        local_files = sorted([
+            f for f in os.listdir(local_dir)
+            if f.lower().endswith(VIDEO_EXTENSIONS)
+            and os.path.abspath(os.path.join(local_dir, f)) != os.path.abspath(os.path.join(output_dir, output_filename))
+        ])
+        ordered_local_files = render_order_controls(f"local_video_order_{local_dir}_{output_dir}_{output_filename}", local_files)
+    else:
+        ordered_local_files = []
+        st.warning("Enter a valid local directory to preview and order videos.")
     
     if st.button("Start Local Concatenation"):
+        if not os.path.isdir(local_dir):
+            st.error("Local directory does not exist.")
+            st.stop()
         # 1. Validate Consistency
-        files = sorted([f for f in os.listdir(local_dir) if f.lower().endswith(VIDEO_EXTENSIONS) and os.path.abspath(os.path.join(local_dir, f)) != os.path.abspath(os.path.join(output_dir, output_filename))])
+        files = ordered_local_files
+        if not files:
+            st.error("No MP4/MOV videos found in the selected local directory.")
+            st.stop()
         if mode == "tiktok":
             st.success("TikTok mode will normalize and re-encode the clips before combining.")
         else:
@@ -226,11 +417,11 @@ else:
         # 2. Concatenate
         output_path = os.path.join(output_dir, output_filename)
         status_text = st.empty()
-        progress_bar = st.progress(0)
+        progress_bar = st.progress(0, text="Waiting to process...")
         
         def streamlit_progress(current, total):
             progress = min(current / total, 1.0) if total > 0 else 0
-            progress_bar.progress(progress)
+            progress_bar.progress(progress, text=f"Processing: {current:.1f}s / {total:.1f}s")
             status_text.text(f"Processing: {current:.1f}s / {total:.1f}s")
 
         success = concatenate_videos_logic(
@@ -242,7 +433,8 @@ else:
             progress_callback=streamlit_progress,
             tiktok_normal_seconds=tiktok_normal_seconds,
             tiktok_slow_factor=tiktok_slow_factor,
-            tiktok_cut_after_seconds=tiktok_cut_after_seconds
+            tiktok_cut_after_seconds=tiktok_cut_after_seconds,
+            ordered_files=files
         )
         if success:
             st.success(f"Done! Saved to: {output_path}")
@@ -258,7 +450,7 @@ st.markdown("---")
 st.markdown("### How it works")
 st.markdown("""
 1. **Upload:** Select all the MP4/MOV clips you want to join.
-2. **Sort:** Files are automatically sorted by name.
+2. **Order:** Review the clip order and swap positions before processing.
 3. **Concat:** Normal and 360 modes join matching videos without re-encoding.
 4. **TikTok:** TikTok mode uses the sidebar timing and cut controls, then combines everything.
 5. **Metadata:** If '360' mode is selected, ExifTool is used to inject spatial metadata from the first clip.

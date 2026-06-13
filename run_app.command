@@ -7,4 +7,4 @@ then
     echo "Streamlit not found. Installing dependencies from requirements.txt..."
     pip install -r requirements.txt
 fi
-streamlit run streamlit_app.py
+streamlit run streamlit_app.py --server.maxUploadSize 102400

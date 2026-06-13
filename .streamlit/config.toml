@@ -1,0 +1,4 @@
+[server]
+# Streamlit defaults browser uploads to 200 MB. The app processes videos locally,
+# so keep the upload gate high enough for large source footage.
+maxUploadSize = 102400

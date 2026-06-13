@@ -383,7 +383,8 @@ def concatenate_videos_logic(
     progress_callback=None,
     tiktok_normal_seconds=TIKTOK_NORMAL_SECONDS,
     tiktok_slow_factor=TIKTOK_SLOW_FACTOR,
-    tiktok_cut_after_seconds=TIKTOK_CUT_AFTER_SECONDS
+    tiktok_cut_after_seconds=TIKTOK_CUT_AFTER_SECONDS,
+    ordered_files=None
 ):
     """
     Core logic for concatenating videos.
@@ -404,19 +405,27 @@ def concatenate_videos_logic(
             logging.critical(f"Failed to create output directory: {e}")
             return False
 
-    # 2. Find and sort video files (ignoring the output file if it's in the same dir)
-    logging.info(f"Scanning for video files in: {working_dir}")
-    try:
-        files = get_video_files(working_dir, output_file)
-    except FileNotFoundError:
-        logging.critical(f"Working directory not found: {working_dir}")
-        return False
+    # 2. Find video files (ignoring the output file if it's in the same dir)
+    if ordered_files is None:
+        logging.info(f"Scanning for video files in: {working_dir}")
+        try:
+            files = get_video_files(working_dir, output_file)
+        except FileNotFoundError:
+            logging.critical(f"Working directory not found: {working_dir}")
+            return False
+        files.sort()
+    else:
+        logging.info("Using selected video order.")
+        files = [
+            filename for filename in ordered_files
+            if filename.lower().endswith(VIDEO_EXTENSIONS)
+            and os.path.exists(os.path.join(working_dir, filename))
+        ]
 
     if not files:
         logging.error("No MP4 or MOV files found in the specified directory.")
         return False
 
-    files.sort()
     logging.info(f"Found {len(files)} video files. Calculating total duration...")
 
     # 3. Calculate total duration
