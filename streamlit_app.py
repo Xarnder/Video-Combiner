@@ -163,6 +163,41 @@ def render_order_controls(state_key, items):
 
     return ordered_items
 
+def render_video_selection_controls(order_state_key, removed_state_key, items):
+    removed_items = set(st.session_state.get(removed_state_key, []))
+    available_items = [item for item in items if item not in removed_items]
+    ordered_items = render_order_controls(order_state_key, available_items)
+
+    if ordered_items:
+        st.markdown("### Remove Videos")
+        for index, item in enumerate(ordered_items):
+            col_name, col_remove = st.columns([5, 1])
+            col_name.write(f"{index + 1}. `{item}`")
+            if col_remove.button("Remove", key=f"{removed_state_key}_remove_{item}"):
+                removed_items.add(item)
+                st.session_state[removed_state_key] = sorted(removed_items)
+                st.session_state[order_state_key] = [
+                    ordered_item for ordered_item in ordered_items
+                    if ordered_item != item
+                ]
+                st.rerun()
+
+    removed_existing_items = [item for item in items if item in removed_items]
+    if removed_existing_items:
+        with st.expander(f"Removed videos ({len(removed_existing_items)})"):
+            for item in removed_existing_items:
+                col_name, col_restore = st.columns([5, 1])
+                col_name.write(f"`{item}`")
+                if col_restore.button("Restore", key=f"{removed_state_key}_restore_{item}"):
+                    removed_items.discard(item)
+                    st.session_state[removed_state_key] = sorted(removed_items)
+                    st.rerun()
+            if st.button("Restore All", key=f"{removed_state_key}_restore_all"):
+                st.session_state[removed_state_key] = []
+                st.rerun()
+
+    return ordered_items
+
 st.set_page_config(page_title="Video Combiner", page_icon="🎬", layout="wide")
 
 # Custom CSS for premium look
@@ -263,10 +298,17 @@ if input_method == "Upload Files":
     )
     if uploaded_files:
         upload_file_map = {uploaded_file.name: uploaded_file for uploaded_file in uploaded_files}
-        ordered_upload_names = render_order_controls("uploaded_video_order", list(upload_file_map.keys()))
+        ordered_upload_names = render_video_selection_controls(
+            "uploaded_video_order",
+            "uploaded_video_removed",
+            list(upload_file_map.keys())
+        )
         total_upload_size = sum(upload_file_map[name].size for name in ordered_upload_names)
-        st.success(f"Selected {len(uploaded_files)} files ({format_size(total_upload_size)} total).")
+        st.success(f"Selected {len(ordered_upload_names)} of {len(uploaded_files)} files ({format_size(total_upload_size)} total).")
         if st.button("Start Concatenation"):
+            if not ordered_upload_names:
+                st.error("No videos selected.")
+                st.stop()
             with tempfile.TemporaryDirectory() as tmp_dir:
                 status_text = st.empty()
                 upload_progress_bar = st.progress(0, text="Preparing uploads...")
@@ -385,7 +427,13 @@ else:
             if f.lower().endswith(VIDEO_EXTENSIONS)
             and os.path.abspath(os.path.join(local_dir, f)) != os.path.abspath(os.path.join(output_dir, output_filename))
         ])
-        ordered_local_files = render_order_controls(f"local_video_order_{local_dir}_{output_dir}_{output_filename}", local_files)
+        local_selection_key = f"local_video_selection_{local_dir}_{output_dir}_{output_filename}"
+        ordered_local_files = render_video_selection_controls(
+            f"{local_selection_key}_order",
+            f"{local_selection_key}_removed",
+            local_files
+        )
+        st.success(f"Selected {len(ordered_local_files)} of {len(local_files)} videos.")
     else:
         ordered_local_files = []
         st.warning("Enter a valid local directory to preview and order videos.")
