@@ -353,8 +353,19 @@ def render_open_output_folder_button(folder_path, key):
             st.error(error)
 
 def choose_folder_with_finder(start_path):
+    if os.name == "nt":
+        picker_code = (
+            "import sys, tkinter as tk; from tkinter import filedialog; "
+            "root=tk.Tk(); root.withdraw(); root.attributes('-topmost', True); "
+            "print(filedialog.askdirectory(initialdir=sys.argv[1])); root.destroy()"
+        )
+        result = subprocess.run([sys.executable, "-c", picker_code, start_path],
+                                capture_output=True, text=True)
+        if result.returncode:
+            return None, "Could not open folder picker. Enter the directory path instead."
+        return result.stdout.strip() or None, None
     if os.name != "posix" or not os.path.exists("/usr/bin/osascript"):
-        return None, "Finder folder selection is only available on macOS."
+        return None, "Enter a local directory path on this platform."
 
     default_path = start_path if os.path.isdir(start_path) else os.path.expanduser("~")
     result = subprocess.run(
@@ -1187,7 +1198,8 @@ with st.sidebar:
     st.header("Settings")
     mode = st.radio(
         "Processing Mode",
-        ["360", "normal", "tiktok", "sidebyside"],
+        ["360", "normal", "tiktok", "sidebyside", "comparison"],
+        format_func=lambda value: "Comparison Contact Sheets" if value == "comparison" else value,
         index=1,
         help="Side-by-side stacks paired clips vertically or horizontally. TikTok mode plays the first 0.5s of every clip normally, then slows the rest to 0.4x."
     )
@@ -1236,13 +1248,14 @@ with st.sidebar:
             format_func=lambda value: "Vertical (top / bottom)" if value == "vertical" else "Horizontal (left / right)",
             help="Vertical doubles height. Horizontal doubles width."
         )
-    output_filename = st.text_input(
-        "Output Filename",
-        value="concatenated_video.mp4" if mode != "sidebyside" else ("sidebyside_clip.mp4" if sidebyside_submode == "single" else "sidebyside_batch.mp4"),
-        help="In batch side-by-side mode this filename only sets the output folder; each pair is saved as <name>_sidebyside.mp4."
-    )
-    list_name = st.text_input("Temp List Filename", value="mylist.txt", help="Name of the temporary text file used by FFmpeg.")
-    force_concat = st.checkbox("Force Concatenate", value=False, help="Bypass metadata mismatch warnings. Use with caution as it may cause glitches.")
+    if mode != "comparison":
+        output_filename = st.text_input(
+            "Output Filename",
+            value="concatenated_video.mp4" if mode != "sidebyside" else ("sidebyside_clip.mp4" if sidebyside_submode == "single" else "sidebyside_batch.mp4"),
+            help="In batch side-by-side mode this filename only sets the output folder; each pair is saved as <name>_sidebyside.mp4."
+        )
+        list_name = st.text_input("Temp List Filename", value="mylist.txt", help="Name of the temporary text file used by FFmpeg.")
+        force_concat = st.checkbox("Force Concatenate", value=False, help="Bypass metadata mismatch warnings. Use with caution as it may cause glitches.")
 
     st.markdown("---")
     st.header("🧹 Cache Management")
@@ -1257,6 +1270,11 @@ with st.sidebar:
     if st.button("🔄 Reset Application"):
         st.rerun()
 
+
+if mode == "comparison":
+    from comparison_ui import render_comparison_mode
+    render_comparison_mode(render_folder_path_picker, ProcessingIndicator, render_open_output_folder_button)
+    st.stop()
 
 input_method = st.radio("Input Method", ["Local Directory Path", "Upload Files"], horizontal=True)
 start_bar = st.empty()

@@ -1,3 +1,4 @@
 streamlit
 streamlit-sortables
 tqdm
+Pillow>=10.1
