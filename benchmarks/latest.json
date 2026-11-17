@@ -1,0 +1,38 @@
+{
+  "source_size": "640x360",
+  "frames": 60,
+  "fps": 30,
+  "output_size": [
+    1280,
+    360
+  ],
+  "results": [
+    {
+      "name": "legacy-two",
+      "seconds": 0.379,
+      "peak_child_mib": 104.83
+    },
+    {
+      "seconds": 1.14,
+      "peak_child_mib": 140.33,
+      "name": "grid-2",
+      "output_bytes": 541944,
+      "encoding_seconds": 0.423
+    },
+    {
+      "seconds": 4.536,
+      "peak_child_mib": 199.22,
+      "name": "grid-16",
+      "output_bytes": 661026,
+      "encoding_seconds": 0.747
+    },
+    {
+      "seconds": 8.403,
+      "peak_child_mib": 264.76,
+      "name": "grid-32",
+      "output_bytes": 701530,
+      "encoding_seconds": 1.121
+    }
+  ],
+  "note": "Legacy: ultrafast lossless, no frame audit. Grid: medium CRF18 plus input/output audits. Not equivalent encoder settings. Repeated source opened as independent inputs. Peak child RSS is measured on Windows; null elsewhere."
+}

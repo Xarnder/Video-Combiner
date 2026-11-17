@@ -1,0 +1,31 @@
+{
+  "source_size": "1920x1080",
+  "frames": 30,
+  "fps": 30,
+  "output_size": [
+    3840,
+    1080
+  ],
+  "results": [
+    {
+      "name": "legacy-two",
+      "seconds": 0.526,
+      "peak_child_mib": 627.17
+    },
+    {
+      "seconds": 7.873,
+      "peak_child_mib": 817.99,
+      "name": "grid-16",
+      "output_bytes": 1595988,
+      "encoding_seconds": 2.691
+    },
+    {
+      "seconds": 13.811,
+      "peak_child_mib": 1240.59,
+      "name": "grid-32",
+      "output_bytes": 1217929,
+      "encoding_seconds": 3.915
+    }
+  ],
+  "note": "Legacy: ultrafast lossless, no frame audit. Grid: medium CRF18 plus input/output audits. Not equivalent encoder settings. Repeated source opened as independent inputs. Peak child RSS is measured on Windows; null elsewhere."
+}

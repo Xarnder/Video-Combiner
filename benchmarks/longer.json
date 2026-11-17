@@ -1,0 +1,24 @@
+{
+  "source_size": "640x360",
+  "frames": 300,
+  "fps": 30,
+  "output_size": [
+    1280,
+    360
+  ],
+  "results": [
+    {
+      "name": "legacy-two",
+      "seconds": 0.47,
+      "peak_child_mib": 106.34
+    },
+    {
+      "seconds": 13.797,
+      "peak_child_mib": 272.01,
+      "name": "grid-32",
+      "output_bytes": 4004048,
+      "encoding_seconds": 3.702
+    }
+  ],
+  "note": "Legacy: ultrafast lossless, no frame audit. Grid: medium CRF18 plus input/output audits. Not equivalent encoder settings. Repeated source opened as independent inputs. Peak child RSS is measured on Windows; null elsewhere."
+}

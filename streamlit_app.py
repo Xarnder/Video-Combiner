@@ -1198,8 +1198,8 @@ with st.sidebar:
     st.header("Settings")
     mode = st.radio(
         "Processing Mode",
-        ["360", "normal", "tiktok", "sidebyside", "comparison"],
-        format_func=lambda value: "Comparison Contact Sheets" if value == "comparison" else value,
+        ["360", "normal", "tiktok", "sidebyside", "comparison", "grid"],
+        format_func=lambda value: "Comparison Contact Sheets" if value == "comparison" else "Multi-video Grid" if value == "grid" else value,
         index=1,
         help="Side-by-side stacks paired clips vertically or horizontally. TikTok mode plays the first 0.5s of every clip normally, then slows the rest to 0.4x."
     )
@@ -1248,7 +1248,7 @@ with st.sidebar:
             format_func=lambda value: "Vertical (top / bottom)" if value == "vertical" else "Horizontal (left / right)",
             help="Vertical doubles height. Horizontal doubles width."
         )
-    if mode != "comparison":
+    if mode not in ("comparison", "grid"):
         output_filename = st.text_input(
             "Output Filename",
             value="concatenated_video.mp4" if mode != "sidebyside" else ("sidebyside_clip.mp4" if sidebyside_submode == "single" else "sidebyside_batch.mp4"),
@@ -1270,6 +1270,11 @@ with st.sidebar:
     if st.button("🔄 Reset Application"):
         st.rerun()
 
+
+if mode == "grid":
+    from grid_ui import show_grid
+    show_grid(render_folder_path_picker, render_video_selection_controls)
+    st.stop()
 
 if mode == "comparison":
     from comparison_ui import render_comparison_mode
