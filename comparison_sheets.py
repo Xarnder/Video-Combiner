@@ -41,11 +41,13 @@ def _probe(path):
 
 
 def _extract(path, timestamp, destination, size):
-    width, height = size
+    filters = []
+    if size is not None:
+        width, height = size
+        filters = ['-vf', f'scale={width}:{height}:force_original_aspect_ratio=decrease:reset_sar=1']
     subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
                     '-ss', str(timestamp), '-i', str(path), '-map', '0:v:0',
-                    '-frames:v', '1', '-vf',
-                    f'scale={width}:{height}:force_original_aspect_ratio=decrease:reset_sar=1',
+                    '-frames:v', '1', *filters,
                     '-threads', '1', str(destination)], capture_output=True, check=True, timeout=120)
     if not destination.is_file():
         raise ValueError('No decodable frame at this position')
@@ -53,16 +55,20 @@ def _extract(path, timestamp, destination, size):
 
 def generate_comparison_sheets(folder, output_dir, frame_count=16, thumbnail_size=(320, 180),
                                sheet_size=None, image_format='PNG', show_position=True,
-                               keep_frames=False, progress_callback=None, status_callback=None):
+                               keep_frames=False, progress_callback=None, status_callback=None,
+                               frame_grouping='video'):
     """Return paths, frame count, and warnings. Progress callback takes (current, total).
 
     Samples include 0% and 100% (the latter uses the last frame's start time).
     A single requested sample uses 50%. Each run gets its own non-overwriting folder.
+    keep_frames exports full-resolution PNGs grouped by 'video' or 'frame'.
     """
     if not isinstance(frame_count, int) or not 1 <= frame_count <= 1000:
         raise ValueError('Frame count must be between 1 and 1000')
     if image_format.upper() not in ('PNG', 'JPEG'):
         raise ValueError('Choose PNG or JPEG')
+    if frame_grouping not in ('video', 'frame'):
+        raise ValueError('Frame grouping must be video or frame')
     if len(thumbnail_size) != 2 or any(not isinstance(v, int) or v < 32 or v > 4096 for v in thumbnail_size):
         raise ValueError('Thumbnail dimensions must be between 32 and 4096 pixels')
     videos = find_comparison_videos(folder)
@@ -87,7 +93,7 @@ def generate_comparison_sheets(folder, output_dir, frame_count=16, thumbnail_siz
     run_dir = Path(tempfile.mkdtemp(prefix='Comparison_', dir=os.path.abspath(output_dir)))
     warnings, metadata, paths = [], [], []
     total = len(videos) * (frame_count + 1) + frame_count
-    completed = extracted = 0
+    completed = extracted = exported = 0
 
     def advance(message):
         nonlocal completed
@@ -127,12 +133,12 @@ def generate_comparison_sheets(folder, output_dir, frame_count=16, thumbnail_siz
                         duration, frame_time = info
                         timestamp = min(relative * duration, max(0, duration - frame_time))
                         try:
-                            _extract(video, timestamp, destination, thumbnail_size)
+                            _extract(video, timestamp, destination, None if keep_frames else thumbnail_size)
                         except (subprocess.SubprocessError, ValueError):
                             if relative != 1:
                                 raise
                             timestamp = max(0, duration - max(frame_time * 2, 0.25))
-                            _extract(video, timestamp, destination, thumbnail_size)
+                            _extract(video, timestamp, destination, None if keep_frames else thumbnail_size)
                         with Image.open(destination) as frame:
                             thumb = ImageOps.contain(frame, (cell_w, image_height))
                             sheet.paste(thumb, (x + (cell_w - thumb.width) // 2,
@@ -140,9 +146,14 @@ def generate_comparison_sheets(folder, output_dir, frame_count=16, thumbnail_siz
                             thumb.close()
                         extracted += 1
                         if keep_frames:
-                            frame_dir = run_dir / 'frames' / f'{index + 1:03d}_{video.name}'
+                            video_name = f'{index + 1:03d}_{video.name}'
+                            frame_name = f'Frame_{position + 1:03d}'
+                            group, filename = ((video_name, frame_name) if frame_grouping == 'video'
+                                               else (frame_name, video_name))
+                            frame_dir = run_dir / 'frames' / group
                             frame_dir.mkdir(parents=True, exist_ok=True)
-                            shutil.copyfile(destination, frame_dir / f'Frame_{position + 1:03d}.png')
+                            shutil.copyfile(destination, frame_dir / f'{filename}.png')
+                            exported += 1
                     except (subprocess.SubprocessError, ValueError, OSError) as exc:
                         draw.text((x + 6, y + 8), 'Frame unavailable', font=font, fill='white')
                         if info is not None:
@@ -174,6 +185,8 @@ def generate_comparison_sheets(folder, output_dir, frame_count=16, thumbnail_siz
             advance(f'Saved {path.name}')
     manifest = {'videos': [p.name for p in videos], 'frame_count': frame_count,
                 'extracted_frames': extracted, 'warnings': warnings,
+                'exported_frames': exported, 'frame_grouping': frame_grouping if keep_frames else None,
                 'positions': [i / (frame_count - 1) if frame_count > 1 else 0.5 for i in range(frame_count)]}
     (run_dir / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
-    return dict(paths=paths, output_dir=str(run_dir), extracted_frames=extracted, warnings=warnings)
+    return dict(paths=paths, output_dir=str(run_dir), extracted_frames=extracted,
+                exported_frames=exported, warnings=warnings)

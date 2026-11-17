@@ -9,6 +9,32 @@ from comparison_sheets import generate_comparison_sheets
 
 
 class ComparisonTests(unittest.TestCase):
+    def test_full_resolution_exports_and_grouping(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'input'
+            source.mkdir()
+            for name, size in [('a.mp4', '640x360'), ('a.mkv', '360x640')]:
+                subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i',
+                                f'testsrc2=size={size}:rate=12', '-t', '1',
+                                '-c:v', 'libx264', str(source / name)], check=True)
+            for grouping in ('video', 'frame'):
+                result = generate_comparison_sheets(source, Path(directory) / 'out', frame_count=3,
+                                                     thumbnail_size=(64, 64), keep_frames=True,
+                                                     frame_grouping=grouping)
+                self.assertEqual(result['exported_frames'], 6)
+                self.assertEqual(result['warnings'], [])
+                root = Path(result['output_dir']) / 'frames'
+                self.assertEqual(len(list(root.rglob('*.png'))), 6)
+                for index, (name, size) in enumerate([('a.mkv', (360, 640)), ('a.mp4', (640, 360))], 1):
+                    for position in range(1, 4):
+                        video, frame = f'{index:03d}_{name}', f'Frame_{position:03d}'
+                        path = root / video / f'{frame}.png' if grouping == 'video' else root / frame / f'{video}.png'
+                        with Image.open(path) as exported:
+                            self.assertEqual(exported.size, size)
+                if grouping == 'video':
+                    with Image.open(root / '002_a.mp4' / 'Frame_001.png') as first, Image.open(root / '002_a.mp4' / 'Frame_003.png') as last:
+                        self.assertNotEqual(first.tobytes(), last.tobytes())
+
     def test_twenty_videos_sixteen_positions_and_failure_slots(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / 'input'
@@ -47,6 +73,8 @@ class ComparisonTests(unittest.TestCase):
             self.assertEqual(result['extracted_frames'], 6)
             self.assertEqual(len(result['warnings']), 1)
             self.assertEqual(len(result['paths']), 3)
+            self.assertEqual(result['exported_frames'], 0)
+            self.assertFalse((Path(result['output_dir']) / 'frames').exists())
             self.assertEqual(progress[-1][0], progress[-1][1])
             with Image.open(result['paths'][0]) as sheet:
                 self.assertEqual(sheet.size, (800, 600))

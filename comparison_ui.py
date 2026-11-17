@@ -21,7 +21,15 @@ def render_comparison_mode(folder_picker, indicator_class, open_folder_button):
     a, b, c = st.columns(3)
     image_format = a.selectbox('Image format', ['PNG', 'JPEG'])
     show_position = b.checkbox('Show timestamp and percentage', True)
-    keep_frames = c.checkbox('Keep extracted frames', False)
+    keep_frames = c.checkbox('Export full-resolution frames', False)
+    frame_grouping = 'video'
+    if keep_frames:
+        frame_grouping = st.selectbox('Group exported frames by', ['video', 'frame'],
+                                     format_func=lambda value: 'Original video' if value == 'video' else 'Frame number')
+        st.caption('Exports full-resolution PNGs at the same divisions as the contact sheets. '
+                   'Frame numbers identify sampled positions, starting at 001. '
+                   'Folders: frames/<video>/Frame_001.png or frames/Frame_001/<video>.png. '
+                   'Full-resolution exports require more disk space.')
     sheet_size = None
     if st.checkbox('Custom contact sheet dimensions'):
         a, b = st.columns(2)
@@ -68,7 +76,7 @@ def render_comparison_mode(folder_picker, indicator_class, open_folder_button):
             with ThreadPoolExecutor(max_workers=1) as executor:
                 job = executor.submit(generate_comparison_sheets, folder, output, count, (tw, th),
                                       sheet_size, image_format, show_position, keep_frames,
-                                      progress, status)
+                                      progress, status, frame_grouping=frame_grouping)
                 while not job.done():
                     drain()
                     time.sleep(0.15)
@@ -81,6 +89,8 @@ def render_comparison_mode(folder_picker, indicator_class, open_folder_button):
     result = st.session_state.get('comparison_result')
     if result:
         st.success(f"{len(result['paths'])} sheets saved to {result['output_dir']}")
+        if result.get('exported_frames'):
+            st.caption(f"{result['exported_frames']} full-resolution PNG frames saved in the frames subfolder.")
         if result['warnings']:
             with st.expander(f"{len(result['warnings'])} extraction warnings"):
                 for warning in result['warnings']:
